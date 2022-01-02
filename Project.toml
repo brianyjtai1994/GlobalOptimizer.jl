@@ -1,4 +1,4 @@
 name = "GlobalOptimizer"
 uuid = "0556ab4a-33c4-4427-92d2-b6051d932f38"
 authors = ["brianyjtai1994 <brianyjtai1994@gmail.com>"]
-version = "0.1.2"
+version = "0.1.3"

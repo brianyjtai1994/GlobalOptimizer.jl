@@ -1,6 +1,11 @@
 module GlobalOptimizer
 
-export minimize!
+const VecI  = AbstractVector # Input  Vector
+const VecO  = AbstractVector # Output Vector
+const VecB  = AbstractVector # Buffer Vector
+const VecIO = AbstractVector # In/Out Vector
+
+export minimize!, minimizer
 
 ############################
 # Sorting                  #
@@ -48,7 +53,7 @@ mutable struct Agent
     v::Bool            # viability / feasibility
     c::Float64         # contravention / violation
 
-    Agent(ND::Int) = new(Vector{Float64}(undef, ND), Inf, false, 0.0) # @code_warntype ✓
+    Agent(nd::Int) = new(Vector{Float64}(undef, nd), Inf, false, 0.0) # @code_warntype ✓
 end
 
 function Base.isequal(a1::Agent, a2::Agent) # @code_warntype ✓
@@ -77,17 +82,17 @@ function born!(x::VecIO, lb::NTuple{ND}, ub::NTuple{ND}) where ND
 end
 
 #### groups, @code_warntype ✓
-function return_agents(ND::Int, NP::Int)
-    agents = Vector{Agent}(undef, NP)
+function return_agents(nd::Int, np::Int)
+    agents = Vector{Agent}(undef, np)
     @inbounds for i in eachindex(agents)
-        agents[i] = Agent(ND)
+        agents[i] = Agent(nd)
     end
     return agents
 end
 
 #### subgroups, @code_warntype ✓
-return_elites(agents::VecI{Agent}, NE::Int)          = view(agents, 1:NE)
-return_throng(agents::VecI{Agent}, NE::Int, NP::Int) = view(agents, NE+1:NP)
+return_elites(agents::VecI{Agent}, ne::Int)          = view(agents, 1:ne)
+return_throng(agents::VecI{Agent}, ne::Int, np::Int) = view(agents, ne+1:np)
 
 #=
     Sine-Cosine Optimizer (https://doi.org/10.1016/j.knosys.2015.12.022)
@@ -267,16 +272,16 @@ struct GlobalMinimizer
     buff::Vector{Float64}
     fork::Vector{Int64}
     pool::Vector{Agent}
-    NP::Int
-    NE::Int
+    np::Int
+    ne::Int
 
-    function GlobalMinimizer(ND::Int, NP::Int, NE::Int)
-        xsol = Vector{Float64}(undef, ND)
-        xerr = Vector{Float64}(undef, ND)
-        buff = Vector{Float64}(undef, ND)
-        fork = Vector{Int}(undef, NE)
-        pool = return_agents(ND, NP)
-        return new(xsol, xerr, buff, fork, pool, NP, NE)
+    function GlobalMinimizer(nd::Int, np::Int, ne::Int)
+        xsol = Vector{Float64}(undef, nd)
+        xerr = Vector{Float64}(undef, nd)
+        buff = Vector{Float64}(undef, nd)
+        fork = Vector{Int}(undef, ne)
+        pool = return_agents(nd, np)
+        return new(xsol, xerr, buff, fork, pool, np, ne)
     end
 end
 
@@ -303,35 +308,35 @@ function inits!(agents::VecIO{Agent}, f::Function, cons::NTuple)
 end
 
 # @code_warntype ✓
-function group!(fork::VecIO{Int}, agents::VecI{Agent}, NE::Int, NC::Int)
+function group!(fork::VecIO{Int}, agents::VecI{Agent}, ne::Int, nc::Int)
     diversity = 0.0
     @inbounds for i in eachindex(fork)
-        diversity += agents[NE + 1].f - agents[i].f
+        diversity += agents[ne + 1].f - agents[i].f
     end
     if iszero(diversity) || isnan(diversity)
         fill!(fork, 1)
     else
         @inbounds for i in eachindex(fork)
-            fork[i] = max(1, round(Int, NC * (agents[NE + 1].f - agents[i].f) / diversity))
+            fork[i] = max(1, round(Int, nc * (agents[ne + 1].f - agents[i].f) / diversity))
         end
     end
-    res = NC - sum(fork) # residue
+    res = nc - sum(fork) # residue
     idx = 2
     while res > 0
         @inbounds fork[idx] += 1; res -= 1
-        idx < NE ? idx += 1 : idx = 2
+        idx < ne ? idx += 1 : idx = 2
     end
     while res < 0
         @inbounds fork[idx] = max(1, fork[idx] - 1); res += 1
-        idx < NE ? idx += 1 : idx = 2
+        idx < ne ? idx += 1 : idx = 2
     end
 end
 
 # @code_warntype ✓
 function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTuple{ND,T}, itmax::Int, dmax::Real, avgtimes::Int) where {ND,T<:Real}
-    NP = o.NP
-    NE = o.NE
-    NC = NP - NE
+    np = o.np
+    ne = o.ne
+    nc = np - ne
 
     cons = boxbounds(lb, ub)
     xsol = o.xsol
@@ -340,8 +345,8 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
     fork = o.fork
 
     agents = o.pool
-    elites = return_elites(agents, NE)
-    throng = return_throng(agents, NE, NP)
+    elites = return_elites(agents, ne)
+    throng = return_throng(agents, ne, np)
 
     generation = 0
     while generation < avgtimes
@@ -355,7 +360,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
         @inbounds while itcount < itmax
             itcount += 1
             ss = logistic(itcount, 0.5 * itmax, -0.618, 20.0 / itmax, 2.0)
-            group!(fork, agents, NE, NC)
+            group!(fork, agents, ne, nc)
 
             #### Moves: throng → elites, elites → the-best
             rx = 1
@@ -368,7 +373,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
                 iszero(fx) && (rx += 1; fx = fork[rx])
             end
             # move agents (in elites) and find the best one
-            for rx in 2:NE
+            for rx in 2:ne
                 sco_move!(buff, elites[1].x, elites[rx].x, ss)
                 check!(buff, elites, rx, fn, cons)
             end
@@ -380,7 +385,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
                     check!(buff, agents, elites, throng, 1, ix, fn, cons)
                 end
             end
-            for rx in 2:NE
+            for rx in 2:ne
                 if !(dmax < nrm2(agents[1].x, elites[rx].x, buff)) || !(0.1 < rand())
                     born!(buff, lb, ub)
                     check!(buff, elites, rx, fn, cons)
@@ -406,5 +411,39 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
         end
     end
 end
+
+############################
+# Interface                #
+############################
+
+"""
+    minimizer(nd::Int; np::Int=35*nd, ne::Int=nd+1)
+An interface function to create/initialize an object for the minimization.
+Arguments:
+---
+- `nd`:     Dimension of parameters to be minimized.
+- `np`:     Desired population size (*optional*).
+- `ne`:     Desired size of elites (*optional*).
+"""
+minimizer(nd::Int; np::Int=35*nd, ne::Int=nd+1) = GlobalMinimizer(nd, np, ne)
+
+"""
+    minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND}, ub::NTuple{ND}; itmax::Int=210*ND, dmax::Real=1e-7, avgtimes::Int=1)
+An interface function to proceed the "global" minimization.
+Arguments:
+---
+- `o`:        An object for the minimization created by `minimizer(...; args...)`.
+- `fn`:       Objective function to be minimized. 
+              `fn` should be callable with only one argument of `fn(x::Vector)`. 
+              If you have any additional arguments need to pass into it, 
+              dispatch the function by `fcall(fn, x; kwargs...) = fn(x; kwargs...)`
+- `lb`:       Lower bounds of minimization which are forced to be feasible.
+- `ub`:       Upper bounds of minimization which are forced to be feasible.
+- `itmax`:    Maximum of minimizing iteration (*optional*).
+- `dmax`:     An Euclidean distance acts as a criterion to
+              prevent the population falling into local minimal (*optional*).
+- `avgtimes`: Number of average times of the whole minimization process (*optional*).
+"""
+minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND}, ub::NTuple{ND}; itmax::Int=210*ND, dmax::Real=1e-7, avgtimes::Int=1) where ND = minimize!(o, fn, lb, ub, itmax, dmax, avgtimes)
 
 end # module
