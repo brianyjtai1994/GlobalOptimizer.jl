@@ -266,6 +266,13 @@ function welford_step(μ::Real, s::Real, v::Real, c::Real)
     return μ, s / (c - 1)
 end
 
+function nrm2(x::VecI{Tx}, y::VecI{Ty}, b::VecB{Tb}) where {Tx<:Real,Ty<:Real,Tb<:Real} # @code_warntype ✓
+    @simd for i in eachindex(b)
+        @inbounds b[i] = abs2(x[i] - y[i])
+    end
+    return sqrt(sum(b))
+end
+
 struct GlobalMinimizer
     xsol::Vector{Float64}
     xerr::Vector{Float64}
@@ -370,7 +377,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
                 sco_move!(buff, elites[rx].x, throng[ix].x, ss)
                 check!(buff, agents, elites, throng, rx, ix, fn, cons)
                 fx -= 1
-                iszero(fx) && (rx += 1; fx = fork[rx])
+                iszero(fx) && rx < ne && (rx += 1; fx = fork[rx])
             end
             # move agents (in elites) and find the best one
             for rx in 2:ne
