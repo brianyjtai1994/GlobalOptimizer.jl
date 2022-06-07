@@ -11,6 +11,17 @@ export minimize!, minimizer
 # Sorting                  #
 ############################
 
+#= 
+  For the randomly generated pool of searching agents, an optimized quick-sort
+  algorithm is a much better choice to sort the pool at the beginning of the
+  optimization process.
+  In contrast, at each temporal end of the searching iteration,
+  the pool is semi-sorted (due to the design of the agents' matchup process),
+  and the insertion sort is much faster in this situation.
+=#
+
+#### Sorting Networks
+
 function swap!(v::VecIO, i::Int, j::Int) # @code_warntype ✓
     @inbounds temp = v[i]
     @inbounds v[i] = v[j]
@@ -18,28 +29,147 @@ function swap!(v::VecIO, i::Int, j::Int) # @code_warntype ✓
     return nothing
 end
 
-biinsert(arr::VecI, val::T) where T = biinsert(arr, val, 1, length(arr)) # @code_warntype ✓
-function biinsert(arr::VecI, val::T, lx::Int, rx::Int) where T           # @code_warntype ✓
-    lx ≥ rx && return lx
-    ub = rx # upper bound
-    while lx < rx
-        mx = (lx + rx) >> 1                                    # midpoint (binary search)
-        @inbounds isless(val, arr[mx]) ? rx = mx : lx = mx + 1 # arr[mx].f == val in this case
-    end
-    @inbounds lx == ub && !isless(val, arr[lx]) && (lx += 1)   # lx = upper bound && arr[lx] ≤ val
-    return lx
+cmpswap!(arr::VecI, i::Int, j::Int) = @inbounds isless(arr[i], arr[j]) || swap!(arr, i, j)
+
+function _sort2!(arr::VecI)
+    cmpswap!(arr, 1, 2)
+    return nothing
 end
 
-binsort!(arr::VecI) = binsort!(arr, 1, length(arr)) # @code_warntype ✓
-function binsort!(arr::VecI, lx::Int, rx::Int)      # @code_warntype ✓
-    for ix in lx+1:rx
-        @inbounds val = arr[ix]
-        jx = ix
-        lc = biinsert(arr, val, lx, ix) # location
-        while jx > lc
-            swap!(arr, jx, jx - 1)
-            jx -= 1
+function _sort3!(arr::VecI)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 2, 3)
+    cmpswap!(arr, 1, 2)
+    return nothing
+end
+
+function _sort4!(arr::VecI)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 3, 4)
+    cmpswap!(arr, 1, 3)
+    cmpswap!(arr, 2, 4)
+    cmpswap!(arr, 2, 3)
+    return nothing
+end
+
+function _sort5!(arr::VecI)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 4, 5)
+    cmpswap!(arr, 3, 5)
+    cmpswap!(arr, 3, 4)
+    cmpswap!(arr, 2, 5)
+    cmpswap!(arr, 1, 4)
+    cmpswap!(arr, 1, 3)
+    cmpswap!(arr, 2, 4)
+    cmpswap!(arr, 2, 3)
+    return nothing
+end
+
+function _sort6!(arr::VecI)
+    cmpswap!(arr, 2, 3)
+    cmpswap!(arr, 5, 6)
+    cmpswap!(arr, 1, 3)
+    cmpswap!(arr, 4, 6)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 4, 5)
+    cmpswap!(arr, 3, 6)
+    cmpswap!(arr, 1, 4)
+    cmpswap!(arr, 2, 5)
+    cmpswap!(arr, 3, 5)
+    cmpswap!(arr, 2, 4)
+    cmpswap!(arr, 3, 4)
+    return nothing
+end
+
+function _sort7!(arr::VecI)
+    cmpswap!(arr, 2, 3)
+    cmpswap!(arr, 4, 5)
+    cmpswap!(arr, 6, 7)
+    cmpswap!(arr, 1, 3)
+    cmpswap!(arr, 4, 6)
+    cmpswap!(arr, 5, 7)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 5, 6)
+    cmpswap!(arr, 3, 7)
+    cmpswap!(arr, 1, 5)
+    cmpswap!(arr, 2, 6)
+    cmpswap!(arr, 1, 4)
+    cmpswap!(arr, 3, 6)
+    cmpswap!(arr, 2, 4)
+    cmpswap!(arr, 3, 5)
+    cmpswap!(arr, 3, 4)
+    return nothing
+end
+
+function _sort8!(arr::VecI)
+    cmpswap!(arr, 1, 2)
+    cmpswap!(arr, 3, 4)
+    cmpswap!(arr, 5, 6)
+    cmpswap!(arr, 7, 8)
+    cmpswap!(arr, 1, 3)
+    cmpswap!(arr, 2, 4)
+    cmpswap!(arr, 5, 7)
+    cmpswap!(arr, 6, 8)
+    cmpswap!(arr, 2, 3)
+    cmpswap!(arr, 6, 7)
+    cmpswap!(arr, 1, 5)
+    cmpswap!(arr, 4, 8)
+    cmpswap!(arr, 2, 6)
+    cmpswap!(arr, 3, 7)
+    cmpswap!(arr, 2, 5)
+    cmpswap!(arr, 4, 7)
+    cmpswap!(arr, 3, 5)
+    cmpswap!(arr, 4, 6)
+    cmpswap!(arr, 4, 5)
+    return nothing
+end
+
+#### A quick-sort algorithm utilizes the sorting networks.
+
+function partition!(arr::VecI, lx::Int, rx::Int)
+    ind = lx
+    val = @inbounds arr[rx]
+    for jx in lx:rx-1
+        if @inbounds isless(arr[jx], val)
+            swap!(arr, ind, jx)
+            ind += 1
         end
+    end
+    swap!(arr, ind, rx)
+    return ind
+end
+
+function netqsort!(arr::VecI, lx::Int, rx::Int)
+    lx ≡ rx && return nothing
+    nx = rx - lx + 1
+    if nx < 9
+        _arr = view(arr, lx:rx)
+        nx ≡ 2 && return _sort2!(_arr)
+        nx ≡ 3 && return _sort3!(_arr)
+        nx ≡ 4 && return _sort4!(_arr)
+        nx ≡ 5 && return _sort5!(_arr)
+        nx ≡ 6 && return _sort6!(_arr)
+        nx ≡ 7 && return _sort7!(_arr)
+        nx ≡ 8 && return _sort8!(_arr)
+    else
+        px = partition!(arr, lx, rx)
+        netqsort!(arr, lx, px - 1)
+        netqsort!(arr, px + 1, rx)
+    end
+    return nothing
+end
+
+#### A common insertion-sort algorithm.
+
+function insertsort!(arr::VecI, lx::Int, rx::Int)
+    for ix in lx+1:rx
+        val = @inbounds arr[ix]
+        ind = ix
+        while (lx < ind && @inbounds isless(val, arr[ind-1]))
+            @inbounds arr[ind] = arr[ind-1]
+            ind -= 1
+        end
+        @inbounds arr[ind] = val
     end
 end
 
@@ -362,7 +492,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
 
         inits!(agents, lb, ub)
         inits!(agents, fn, cons)
-        binsort!(agents)
+        netqsort!(agents, 1, np)
 
         @inbounds while itcount < itmax
             itcount += 1
@@ -408,7 +538,7 @@ function minimize!(o::GlobalMinimizer, fn::Function, lb::NTuple{ND,T}, ub::NTupl
                 !agent.v && (agent.f = agent.c + fmax)
             end
 
-            binsort!(agents)
+            insertsort!(agents, 1, np)
             dmax -= dmax / itmax
         end
 
